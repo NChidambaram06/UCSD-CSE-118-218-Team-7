@@ -82,6 +82,50 @@ class CreateEventIntentHandler(AbstractRequestHandler):
             .response
         )
 
+class EntireScheduleIntentHandler(AbstractRequestHandler):
+    def can_handle(self, handler_input):
+        
+        return ask_utils.is_intent_name("EntireScheduleIntent")(handler_input)
+    
+    def handle(self, handler_input):
+        slots = handler_input.request_envelope.request.intent.slots
+        date = str(slots["date"].value)
+
+        # Parse the date and set the time range
+        date_obj = datetime.strptime(date, "%Y-%m-%d")
+        time_min = datetime(date_obj.year, date_obj.month, date_obj.day, 0, 0)
+        time_max = time_min + timedelta(days=1)
+        
+        # Fetch events from Google Calendar
+        service = build(API_NAME, API_VERSION, credentials=creds)
+        events_result = service.events().list(
+            calendarId=calendar_id,
+            timeMin=time_min.isoformat() + "Z",
+            timeMax=time_max.isoformat() + "Z",
+            singleEvents=True,
+            orderBy="startTime"
+        ).execute()
+        events = events_result.get("items", [])
+        
+        # Prepare Alexa's response
+        if not events:
+            speak_output = f"No events found for {date}."
+        else:
+            event_list = []
+            for event in events:
+                start_time = event["start"].get("dateTime", event["start"].get("date"))
+                event_list.append(f"{event['summary']} at {start_time}")
+            event_text = ", ".join(event_list)
+            speak_output = f"Your schedule for {date} is: {event_text}."
+        
+        return (
+            handler_input.response_builder
+                .speak(speak_output)
+                .set_should_end_session(True)
+                .response
+        )
+
+
 class HelpIntentHandler(AbstractRequestHandler):
     """Handler for Help Intent."""
     def can_handle(self, handler_input):
@@ -194,7 +238,7 @@ sb = SkillBuilder()
 
 sb.add_request_handler(LaunchRequestHandler())
 sb.add_request_handler(CreateEventIntentHandler())
-# sb.add_request_handler(EntireScheduleIntentHandler())
+sb.add_request_handler(EntireScheduleIntentHandler())
 sb.add_request_handler(HelpIntentHandler())
 sb.add_request_handler(CancelOrStopIntentHandler())
 sb.add_request_handler(FallbackIntentHandler())
