@@ -84,47 +84,58 @@ class CreateEventIntentHandler(AbstractRequestHandler):
 
 class EntireScheduleIntentHandler(AbstractRequestHandler):
     def can_handle(self, handler_input):
-        
         return ask_utils.is_intent_name("EntireScheduleIntent")(handler_input)
     
     def handle(self, handler_input):
+        # Get the date slot from the Alexa request
         slots = handler_input.request_envelope.request.intent.slots
         date = str(slots["date"].value)
 
         # Parse the date and set the time range
         date_obj = datetime.strptime(date, "%Y-%m-%d")
-        time_min = datetime(date_obj.year, date_obj.month, date_obj.day, 0, 0)
-        time_max = time_min + timedelta(days=1)
+        time_min = datetime(date_obj.year, date_obj.month, date_obj.day, 0, 0).isoformat() #+ "Z"
+        time_max = datetime(date_obj.year, date_obj.month, date_obj.day, 23, 59).isoformat() #+ "Z"
         
         # Fetch events from Google Calendar
         service = build(API_NAME, API_VERSION, credentials=creds)
-        events_result = service.events().list(
-            calendarId=calendar_id,
-            timeMin=time_min.isoformat() + "Z",
-            timeMax=time_max.isoformat() + "Z",
-            singleEvents=True,
-            orderBy="startTime"
-        ).execute()
-        events = events_result.get("items", [])
         
+        events = []
+        page_token = None
+        while True:
+            # Fetch events for the given date range
+            events_result = service.events().list(
+                calendarId=calendar_id,
+                timeMin=time_min,
+                timeMax=time_max,
+                singleEvents=True,  # Ensures recurring events are split
+                orderBy="startTime", # Orders by event start time
+                pageToken=page_token,
+            ).execute()
+
+            events.extend(events_result.get("items", []))
+            page_token = events_result.get("nextPageToken")
+            if not page_token:
+                break
+
         # Prepare Alexa's response
         if not events:
-            speak_output = f"No events found for {date}."
+            speak_output = f"You have no events scheduled for {date}."
         else:
             event_list = []
             for event in events:
                 start_time = event["start"].get("dateTime", event["start"].get("date"))
-                event_list.append(f"{event['summary']} at {start_time}")
+                event_time = datetime.fromisoformat(start_time.replace("Z", "+00:00")).strftime("%H:%M")
+                event_list.append(f"{event['summary']} at {event_time}")
             event_text = ", ".join(event_list)
-            speak_output = f"Your schedule for {date} is: {event_text}."
-        
+            speak_output = f"Your schedule for {date} includes: {event_text}."
+
+        # Respond to the user
         return (
             handler_input.response_builder
                 .speak(speak_output)
                 .set_should_end_session(True)
                 .response
         )
-
 
 class HelpIntentHandler(AbstractRequestHandler):
     """Handler for Help Intent."""
