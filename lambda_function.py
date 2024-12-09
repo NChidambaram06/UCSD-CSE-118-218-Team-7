@@ -1,46 +1,30 @@
-# This sample demonstrates handling intents from an Alexa skill using the Alexa Skills Kit SDK for Python.
-# Please visit https://alexa.design/cookbook for additional examples on implementing slots, dialog management,
-# session persistence, api calls, and more.
-# This sample is built using the handler classes approach in skill builder.
 import logging
 import ask_sdk_core.utils as ask_utils
 import pytz
-
 from ask_sdk_core.skill_builder import SkillBuilder
 from ask_sdk_core.dispatch_components import AbstractRequestHandler
 from ask_sdk_core.dispatch_components import AbstractExceptionHandler
 from ask_sdk_core.handler_input import HandlerInput
-
 from ask_sdk_model import Response
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-
 from datetime import datetime, timedelta
 
 scope = ["https://www.googleapis.com/auth/calendar"]
-
 creds = service_account.Credentials.from_service_account_file("creds.json", scopes=scope)
-
 API_NAME = 'calendar'
 API_VERSION = 'v3'
-
 calendar_id = "60b64ad4c3f932a896b4f25927c7dc8905684dfc0961b62b51f698b6e58c6625@group.calendar.google.com"
 
-
 class LaunchRequestHandler(AbstractRequestHandler):
-    """Handler for Skill Launch."""
     def can_handle(self, handler_input):
-        # type: (HandlerInput) -> bool
-
         return ask_utils.is_request_type("LaunchRequest")(handler_input)
 
     def handle(self, handler_input):
-        # type: (HandlerInput) -> Response
         speak_output = "Welcome to your calendar assistant. Say meeting to schedule an event, say delete event to delete an event, and schedule to get your schedule for any date"
 
         return (
@@ -66,13 +50,26 @@ class CreateEventIntentHandler(AbstractRequestHandler):
         mins = int(time.split(":")[1])
         time_min = datetime(dateSlot.year, dateSlot.month, dateSlot.day, hour, mins)
         time_max = time_min + timedelta(hours = 1)
-        reserve_event(time_min, time_max,eventName)
+
+        service = build(API_NAME, API_VERSION, credentials=creds)
+
+        # Check availability
+        is_available = check_availability(time_min, time_max)
+        
+        if not is_available:
+            speak_output = (
+                f"Sorry, the time slot from {time_min.strftime('%I:%M %p')} to {time_max.strftime('%I:%M %p')}"
+                f"is already booked. Please try a different time."
+            )
+            return handler_input.response_builder.speak(speak_output).set_should_end_session(True).response
+
+        reserve_event(service, time_min, time_max,eventName)
         
         speak_output = (
                 f"{eventName} has been successfully booked for {date} from "
                 f"{time_min.strftime('%I:%M %p')} to {time_max.strftime('%I:%M %p')}."
         )
-        
+
         return (
             handler_input.response_builder
             .speak(speak_output)
@@ -80,6 +77,28 @@ class CreateEventIntentHandler(AbstractRequestHandler):
             .response
         )
 
+def reserve_event(service, time_min, time_max, event_name):
+    event = {
+        'summary': event_name,
+        'description': "Automated Event Description",
+        'start': {
+            'dateTime': time_min.strftime("%Y-%m-%dT%H:%M:%S"),
+            'timeZone': 'America/Los_Angeles'
+        },
+        'end': {
+            'dateTime': time_max.strftime("%Y-%m-%dT%H:%M:%S"),
+            'timeZone': 'America/Los_Angeles'
+        },
+        'reminders': {
+            'useDefault': False,
+            'overrides': [
+                {'method': 'popup', 'minutes': 30}
+            ],
+        },
+    }
+
+    created_event = service.events().insert(calendarId=calendar_id, body=event).execute()
+    print(f"Event created: {created_event.get('htmlLink')}")
 
 class DeleteEventIntentHandler(AbstractRequestHandler):
     def can_handle(self, handler_input):
@@ -201,144 +220,6 @@ class DayScheduleIntentHandler(AbstractRequestHandler):
                 .response
         )
 
-# class UpdateEventIntent(AbstractRequestHandler):
-#     def can_handle(self, handler_input):
-#         return ask_utils.is_intent_name("UpdateEventIntent")(handler_input)
-
-#     def handle(self, handler_input):
-#         slots = handler_input.request_envelope.request.intent.slots
-#         date = str(slots["date"].value)
-#         event_name = str(slots["eventName"].value)
-#         time = str(slots["time"].value)
-    
-#         dateSlot = datetime.strptime(date, "%Y-%m-%d")
-#         hour = int(time.split(":")[0])
-#         mins = int(time.split(":")[1])
-#         time_min = datetime(dateSlot.year, dateSlot.month, dateSlot.day, hour, mins)
-#         time_max = time_min + timedelta(hours = 1)
-        
-#         events = []
-#         page_token = None
-#         while True:
-#             # Fetch events for the given date range
-#             events_result = service.events().list(
-#                 calendarId=calendar_id,
-#                 singleEvents=True,  # Ensures recurring events are split
-#                 orderBy="startTime", # Orders by event start time
-#                 pageToken=page_token,
-#             ).execute()
-
-#             events.extend(events_result.get("items", []))
-#             page_token = events_result.get("nextPageToken")
-#             if not page_token:
-#                 break
-        
-#         event_found = None
-#         for event in events:
-#             if (
-#                 event["summary"].lower() == event_name.lower()
-#             ):
-#                 event_found = event
-#                 break
-
-#         if not event_found:
-#             speak_output = f"No event named '{event_name}' found on {date} to update."
-#             return (
-#                 handler_input.response_builder
-#                 .speak(speak_output)
-#                 .set_should_end_session(True)
-#                 .response
-#             )
-
-#         # Update the event with new time range
-#         event_found["start"]["dateTime"] = new_start
-#         event_found["end"]["dateTime"] = new_end
-
-#         updated_event = service.events().update(
-#             calendarId=calendar_id,
-#             eventId=event_found["id"],
-#             body=event_found
-#         ).execute()
-
-#         speak_output = (
-#             f"The event '{event_name}' on {date} has been updated "
-#             f"to start at {time_min.strftime('%H:%M')} and end at {time_max.strftime('%H:%M')}."
-#         )
-
-#         # Respond to the user
-#         return (
-#             handler_input.response_builder
-#             .speak(speak_output)
-#             .set_should_end_session(True)
-#             .response
-#         )
-
-# class UpdateEventIntent(AbstractRequestHandler):
-#     def can_handle(self, handler_input):
-#         return ask_utils.is_intent_name("UpdateEventIntent")(handler_input)
-
-#     def handle(self, handler_input):
-        
-#         # Extract slot values
-#         slots = handler_input.request_envelope.request.intent.slots
-#         date = str(slots["date"].value)
-#         time = str(slots["time"].value)
-
-#         date_slot = datetime.strptime(date, "%Y-%m-%d")
-#         hour = int(time.split(":")[0])
-#         mins = int(time.split(":")[1])
-#         time_min = datetime(
-#             date_slot.year, date_slot.month, date_slot.day, hour, mins
-#         )
-#         time_max = time_min + timedelta(hours=1)
-
-            
-#         new_start = time_min.isoformat() + "Z"
-#         new_end = time_max.isoformat() + "Z"
-
-#         event_name = str(slots["eventName"].value)
-        
-#         # Fetch events from Google Calendar
-#         service = build(API_NAME, API_VERSION, credentials=creds)
-        
-#         events = []
-#         page_token = None
-#         while True:
-#             # Fetch events for the given date range
-#             events_result = service.events().list(
-#                 calendarId=calendar_id,
-#                 singleEvents=True,  # Ensures recurring events are split
-#                 orderBy="startTime", # Orders by event start time
-#                 pageToken=page_token,
-#             ).execute()
-
-#             events.extend(events_result.get("items", []))
-#             page_token = events_result.get("nextPageToken")
-#             if not page_token:
-#                 break
-
-#         # Prepare Alexa's response
-#         if not events:
-#             speak_output = f"You have no event named {event_name}."
-#         else:
-#             event_list = []
-#             for event in events:
-#                 if(event_name == event['summary']):
-#                     service.events().delete(calendarId=calendar_id, eventId=event['id']).execute()
-                
-            
-
-#         reserve_event(time_min, time_max, event_name)
-#         speak_output = f"{event_name} has been updated!"
-
-#         # Respond to the user
-#         return (
-#             handler_input.response_builder
-#                 .speak(speak_output)
-#                 .set_should_end_session(True)
-#                 .response
-#         )
-
 class HelpIntentHandler(AbstractRequestHandler):
     """Handler for Help Intent."""
     def can_handle(self, handler_input):
@@ -445,7 +326,6 @@ class CatchAllExceptionHandler(AbstractExceptionHandler):
         )
 
 sb = SkillBuilder()
-
 sb.add_request_handler(LaunchRequestHandler())
 sb.add_request_handler(CreateEventIntentHandler())
 sb.add_request_handler(DayScheduleIntentHandler())
@@ -454,58 +334,7 @@ sb.add_request_handler(HelpIntentHandler())
 sb.add_request_handler(CancelOrStopIntentHandler())
 sb.add_request_handler(FallbackIntentHandler())
 sb.add_request_handler(SessionEndedRequestHandler())
-sb.add_request_handler(IntentReflectorHandler()) # make sure IntentReflectorHandler is last so it doesn't override your custom intent handlers
-
+sb.add_request_handler(IntentReflectorHandler())
 
 sb.add_exception_handler(CatchAllExceptionHandler())
-
 lambda_handler = sb.lambda_handler()
-def reserve_event(time_min, time_max, event_name):
-    # Initialize Google Calendar API service
-    service = build(API_NAME, API_VERSION, credentials=creds)
-
-    # Define event payload
-    event = {
-        'summary': event_name,
-        'description': "Automated Event Description",
-        'start': {
-            'dateTime': time_min.strftime("%Y-%m-%dT%H:%M:%S"),
-            'timeZone': 'America/Los_Angeles'
-        },
-        'end': {
-            'dateTime': time_max.strftime("%Y-%m-%dT%H:%M:%S"),
-            'timeZone': 'America/Los_Angeles'
-        },
-        'reminders': {
-            'useDefault': False,
-            'overrides': [
-                {'method': 'popup', 'minutes': 30}
-            ],
-        },
-    }
-
-    # Insert event into Google Calendar
-    try:
-        created_event = service.events().insert(calendarId=calendar_id, body=event).execute()
-        print(f"Event created: {created_event.get('htmlLink')}")
-    except Exception as e:
-        print(f"An error occurred: {e}")
-
-def check_availability(service, time_min, time_max, calendar_id):
-    try:
-        # Prepare Free/Busy request payload
-        payload = {
-            "timeMin": time_min.isoformat() + "Z",  # ISO format with UTC timezone
-            "timeMax": time_max.isoformat() + "Z",
-            "items": [{"id": calendar_id}]
-        }
-
-        # Query Free/Busy API
-        freebusy_result = service.freebusy().query(body=payload).execute()
-        busy_periods = freebusy_result.get('calendars', {}).get(calendar_id, {}).get('busy', [])
-
-        # If 'busy' list is empty, the slot is free
-        return len(busy_periods) == 0
-    except Exception as e:
-        print(f"Error in check_availability: {e}")
-        return None  # Return None to indicate an error occurred
