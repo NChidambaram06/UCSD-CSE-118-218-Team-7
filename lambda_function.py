@@ -50,7 +50,6 @@ class LaunchRequestHandler(AbstractRequestHandler):
                 .response
         )
 
-
 class CreateEventIntentHandler(AbstractRequestHandler):
     def can_handle(self, handler_input):
         # Check if the request is for CreateEventIntent
@@ -83,7 +82,7 @@ class CreateEventIntentHandler(AbstractRequestHandler):
 
 class DayScheduleIntentHandler(AbstractRequestHandler):
     def can_handle(self, handler_input):
-        return ask_utils.is_intent_name("EntireScheduleIntent")(handler_input)
+        return ask_utils.is_intent_name("DayScheduleIntent")(handler_input)
 
     def handle(self, handler_input):
         slots = handler_input.request_envelope.request.intent.slots
