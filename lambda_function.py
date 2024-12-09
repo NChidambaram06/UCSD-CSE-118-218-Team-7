@@ -325,16 +325,11 @@ class DayScheduleIntentHandler(AbstractRequestHandler):
 #             for event in events:
 #                 if(event_name == event['summary']):
 #                     service.events().delete(calendarId=calendar_id, eventId=event['id']).execute()
-#                     speak_output = f"Event has been deleted!"
-
-#                     return (
-#                         handler_input.response_builder
-#                             .speak(speak_output)
-#                             .set_should_end_session(True)
-#                             .response
-#                     )
                 
-#             speak_output = f"{event_name} has been deleted"
+            
+
+#         reserve_event(time_min, time_max, event_name)
+#         speak_output = f"{event_name} has been updated!"
 
 #         # Respond to the user
 #         return (
@@ -343,9 +338,6 @@ class DayScheduleIntentHandler(AbstractRequestHandler):
 #                 .set_should_end_session(True)
 #                 .response
 #         )
-        
-        
-
 
 class HelpIntentHandler(AbstractRequestHandler):
     """Handler for Help Intent."""
@@ -499,19 +491,21 @@ def reserve_event(time_min, time_max, event_name):
     except Exception as e:
         print(f"An error occurred: {e}")
 
-def check_availability(time_min, time_max):
-    service = build(API_NAME, API_VERSION, credentials=creds)
-
-    # Query for Free/Busy information
-    payload = {
-        "timeMin": time_min.strftime("%Y-%m-%dT%H:%M:%S"),
-        "timeMax": time_max.strftime("%Y-%m-%dT%H:%M:%S"),
-        "items": [{"id": calendar_id}]
-    }
-
+def check_availability(service, time_min, time_max, calendar_id):
     try:
-        freebusy = service.freebusy().query(body=payload).execute()
-        print(f"Free/Busy Response: {freebusy}")
-        return freebusy
+        # Prepare Free/Busy request payload
+        payload = {
+            "timeMin": time_min.isoformat() + "Z",  # ISO format with UTC timezone
+            "timeMax": time_max.isoformat() + "Z",
+            "items": [{"id": calendar_id}]
+        }
+
+        # Query Free/Busy API
+        freebusy_result = service.freebusy().query(body=payload).execute()
+        busy_periods = freebusy_result.get('calendars', {}).get(calendar_id, {}).get('busy', [])
+
+        # If 'busy' list is empty, the slot is free
+        return len(busy_periods) == 0
     except Exception as e:
-        print(f"An error occurred while checking availability: {e}")    
+        print(f"Error in check_availability: {e}")
+        return None  # Return None to indicate an error occurred
